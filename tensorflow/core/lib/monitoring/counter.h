@@ -13,8 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_ACCUMULATOR_H_
-#define THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_ACCUMULATOR_H_
+#ifndef THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_COUNTER_H_
+#define THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_COUNTER_H_
+
+// We replace this implementation with a null implementation for mobile
+// platforms.
+#include "tensorflow/core/platform/platform.h"
+#ifdef IS_MOBILE_PLATFORM
+#include "tensorflow/core/lib/monitoring/mobile_counter.h"
+#else
 
 #include <array>
 #include <atomic>
@@ -26,8 +33,6 @@ limitations under the License.
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/thread_annotations.h"
-
-// WARNING: Not yet ready for usage.
 
 namespace tensorflow {
 namespace monitoring {
@@ -59,7 +64,7 @@ class CounterCell {
   TF_DISALLOW_COPY_AND_ASSIGN(CounterCell);
 };
 
-// A stateful class for updating a cumulative metric.
+// A stateful class for updating a cumulative integer metric.
 //
 // This class encapsulates a set of values (or a single value for a label-less
 // metric). Each value is identified by a tuple of labels. The class allows the
@@ -79,9 +84,13 @@ class Counter {
     registration_handle_.reset();
   }
 
-  // Creates the metric based on the metric-definition.
-  static Counter* New(
-      const MetricDef<MetricKind::kCumulative, int64, NumLabels>& metric_def);
+  // Creates the metric based on the metric-definition arguments.
+  //
+  // Example;
+  // auto* counter_with_label = Counter<1>::New("/tensorflow/counter",
+  //   "Tensorflow counter", "MyLabelName");
+  template <typename... MetricDefArgs>
+  static Counter* New(MetricDefArgs&&... metric_def_args);
 
   // Retrieves the cell for the specified labels, creating it on demand if
   // not already present.
@@ -120,18 +129,21 @@ class Counter {
 //  Implementation details follow. API readers may skip.
 ////
 
-template <int NumLabels>
-Counter<NumLabels>* Counter<NumLabels>::New(
-    const MetricDef<MetricKind::kCumulative, int64, NumLabels>& metric_def) {
-  return new Counter<NumLabels>(metric_def);
-}
-
 inline void CounterCell::IncrementBy(const int64 step) {
   DCHECK_LE(0, step) << "Must not decrement cumulative metrics.";
   value_ += step;
 }
 
 inline int64 CounterCell::value() const { return value_; }
+
+template <int NumLabels>
+template <typename... MetricDefArgs>
+Counter<NumLabels>* Counter<NumLabels>::New(
+    MetricDefArgs&&... metric_def_args) {
+  return new Counter<NumLabels>(
+      MetricDef<MetricKind::kCumulative, int64, NumLabels>(
+          std::forward<MetricDefArgs>(metric_def_args)...));
+}
 
 template <int NumLabels>
 template <typename... Labels>
@@ -143,7 +155,7 @@ CounterCell* Counter<NumLabels>::GetCell(const Labels&... labels)
                 "Mismatch between Counter<NumLabels> and number of labels "
                 "provided in GetCell(...).");
 
-  const LabelArray& label_array = {labels...};
+  const LabelArray& label_array = {{labels...}};
   mutex_lock l(mu_);
   const auto found_it = cells_.find(label_array);
   if (found_it != cells_.end()) {
@@ -159,4 +171,5 @@ CounterCell* Counter<NumLabels>::GetCell(const Labels&... labels)
 }  // namespace monitoring
 }  // namespace tensorflow
 
-#endif  // THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_ACCUMULATOR_H_
+#endif  // IS_MOBILE_PLATFORM
+#endif  // THIRD_PARTY_TENSORFLOW_CORE_LIB_MONITORING_COUNTER_H_

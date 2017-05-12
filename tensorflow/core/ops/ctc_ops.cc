@@ -18,9 +18,9 @@ limitations under the License.
 
 namespace tensorflow {
 
-using shape_inference::Dimension;
+using shape_inference::DimensionHandle;
 using shape_inference::InferenceContext;
-using shape_inference::Shape;
+using shape_inference::ShapeHandle;
 
 // CTC is Connectionist Temporal Classification.  See util/ctc/ for details.
 
@@ -31,26 +31,27 @@ REGISTER_OP("CTCLoss")
     .Input("sequence_length: int32")
     .Attr("preprocess_collapse_repeated: bool = false")
     .Attr("ctc_merge_repeated: bool = true")
+    .Attr("ignore_longer_outputs_than_inputs: bool = false")
     .Output("loss: float")
     .Output("gradient: float")
     .SetShapeFn([](InferenceContext* c) {
-      const Shape* inputs;
-      const Shape* labels_indices;
-      const Shape* labels_values;
-      const Shape* sequence_length;
+      ShapeHandle inputs;
+      ShapeHandle labels_indices;
+      ShapeHandle labels_values;
+      ShapeHandle sequence_length;
 
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &inputs));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 2, &labels_indices));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 1, &labels_values));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 1, &sequence_length));
 
-      const Dimension* unused;
+      DimensionHandle unused;
       TF_RETURN_IF_ERROR(c->Merge(c->Dim(labels_indices, 0),
                                   c->Dim(labels_values, 0), &unused));
 
       // Get batch size from inputs and sequence_length, and update inputs
       // with the merged batch_size since it is returned.
-      const Dimension* batch_size;
+      DimensionHandle batch_size;
       TF_RETURN_IF_ERROR(
           c->Merge(c->Dim(inputs, 1), c->Dim(sequence_length, 0), &batch_size));
       TF_RETURN_IF_ERROR(c->ReplaceDim(inputs, 1, batch_size, &inputs));
@@ -75,6 +76,9 @@ preprocess_collapse_repeated: Scalar, if true then repeated labels are
 ctc_merge_repeated: Scalar.  If set to false, *during* CTC calculation
   repeated non-blank labels will not be merged and are interpreted as
   individual labels.  This is a simplified version of CTC.
+ignore_longer_outputs_than_inputs: Scalar. If set to true, during CTC
+  calculation items have longer input sequences than output sequences
+  are ignored by returning zero-gradient for those items.
 loss: A vector (batch) containing log-probabilities.
 gradient: The gradient of `loss`.  3-D, shape:
   `(max_time x batch_size x num_classes)`.
@@ -89,18 +93,18 @@ REGISTER_OP("CTCGreedyDecoder")
     .Output("decoded_shape: int64")
     .Output("log_probability: float")
     .SetShapeFn([](InferenceContext* c) {
-      const Shape* inputs;
-      const Shape* sequence_length;
+      ShapeHandle inputs;
+      ShapeHandle sequence_length;
 
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &inputs));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &sequence_length));
 
       // Get batch size from inputs and sequence_length.
-      const Dimension* batch_size;
+      DimensionHandle batch_size;
       TF_RETURN_IF_ERROR(
           c->Merge(c->Dim(inputs, 1), c->Dim(sequence_length, 0), &batch_size));
 
-      const Dimension* total_decoded_outputs = c->UnknownDim();
+      DimensionHandle total_decoded_outputs = c->UnknownDim();
       c->set_output(0, c->Matrix(total_decoded_outputs, 2));
       c->set_output(1, c->Vector(total_decoded_outputs));
       c->set_output(2, c->Vector(2));
@@ -113,7 +117,7 @@ Performs greedy decoding on the logits given in inputs.
 A note about the attribute merge_repeated: if enabled, when
 consecutive logits' maximum indices are the same, only the first of
 these is emitted.  Labeling the blank '*', the sequence "A B B * B B"
-becomes "A B" if merge_repeated = True and "A B B B B" if
+becomes "A B B" if merge_repeated = True and "A B B B B" if
 merge_repeated = False.
 
 Regardless of the value of merge_repeated, if the maximum index of a given
@@ -144,14 +148,14 @@ REGISTER_OP("CTCBeamSearchDecoder")
     .Output("decoded_shape: top_paths * int64")
     .Output("log_probability: float")
     .SetShapeFn([](InferenceContext* c) {
-      const Shape* inputs;
-      const Shape* sequence_length;
+      ShapeHandle inputs;
+      ShapeHandle sequence_length;
 
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 3, &inputs));
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &sequence_length));
 
       // Get batch size from inputs and sequence_length.
-      const Dimension* batch_size;
+      DimensionHandle batch_size;
       TF_RETURN_IF_ERROR(
           c->Merge(c->Dim(inputs, 1), c->Dim(sequence_length, 0), &batch_size));
 
@@ -166,7 +170,7 @@ REGISTER_OP("CTCBeamSearchDecoder")
       for (int i = 0; i < top_paths; ++i) {  // decoded_values
         c->set_output(out_idx++, c->Vector(InferenceContext::kUnknownDim));
       }
-      const Shape* shape_v = c->Vector(2);
+      ShapeHandle shape_v = c->Vector(2);
       for (int i = 0; i < top_paths; ++i) {  // decoded_shape
         c->set_output(out_idx++, shape_v);
       }
